@@ -7,7 +7,7 @@ body {
 }
 
 .font-display {
-  font-family: 'Museo Sans Display',sans-serif;
+  font-family: 'museo-sans',sans-serif;
   font-optical-sizing: auto;
   letter-spacing: -0.01em;
 }
