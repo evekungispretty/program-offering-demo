@@ -1,7 +1,7 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import {
   Plus, Search, Trash2, X, MapPin, Globe, Layers,
-  GraduationCap, RotateCcw, Check, ChevronRight,
+  GraduationCap, RotateCcw, Check, ChevronRight, ChevronDown,
   AlertCircle, BookOpen, Filter, Eye, PencilLine, ExternalLink,
   Archive, FileText, LayoutGrid, List, Image as ImageIcon,
 } from 'lucide-react'
@@ -11,13 +11,14 @@ import { SEED_PROGRAMS, DEFAULT_CATEGORIES } from './data.js'
    Constants
 ============================================================================ */
 
-const DEGREE_TYPES_PRESET = [
-  'Certificate', 'Minor', 'Undergraduate Minor', 'Graduate Minor',
-  'B.A.', 'B.A.E.',
-  'M.A.', 'M.A.E.', 'M.Ed.',
-  'Ed.S.', 'Ed.D.', 'Ph.D.',
-  'Reading Endorsement', 'EdTech 4+1',
-]
+const DEGREE_CATEGORIES = ['Doctorate', 'Masters', 'Bachelors', 'Certificate']
+
+const DEGREE_ABBREV_SUGGESTIONS = {
+  Doctorate:   ['Ed.D.', 'Ph.D.'],
+  Masters:     ['M.A.', 'M.A.E.', 'M.Ed.', 'Ed.S.'],
+  Bachelors:   ['B.A.', 'B.A.E.', 'B.S.', 'B.S.E.'],
+  Certificate: ['Reading Endorsement', 'EdTech 4+1'],
+}
 
 const DELIVERY_MODES = [
   { value: 'on-campus', label: 'On Campus', Icon: MapPin },
@@ -136,7 +137,7 @@ export default function App() {
       ps.map((p) =>
         p.id !== programId
           ? p
-          : { ...p, degrees: [...p.degrees, { id: genId(), type: 'M.Ed.', deliveryMode: 'on-campus', url: '' }] }
+          : { ...p, degrees: [...p.degrees, { id: genId(), degreeCategory: 'Masters', type: '', deliveryMode: 'on-campus', url: '' }] }
       )
     )
 
@@ -273,10 +274,12 @@ function SaveIndicator({ status }) {
 
 function AdminView({
   programs, categories, selected, setSelectedId,
-  addProgram, updateProgram, deleteProgram,
-  addDegree, updateDegree, removeDegree, addCategory,
+  addProgram, updateProgram, deleteProgram, addCategory,
 }) {
   const [search, setSearch] = useState('')
+  const [adminLayout, setAdminLayout] = useState('editor')
+  const [editorDirty, setEditorDirty] = useState(false)
+  const [pendingAction, setPendingAction] = useState(null)
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -286,8 +289,54 @@ function AdminView({
     )
   }, [programs, search])
 
+  const handleSelectProgram = (id) => {
+    if (editorDirty && id !== selected?.id) {
+      setPendingAction({ type: 'select', id })
+    } else {
+      setSelectedId(id)
+    }
+  }
+
+  const handleAddProgram = () => {
+    if (editorDirty) {
+      setPendingAction({ type: 'new' })
+    } else {
+      addProgram()
+    }
+  }
+
+  const confirmDiscard = () => {
+    const action = pendingAction
+    setPendingAction(null)
+    setEditorDirty(false)
+    if (action?.type === 'select') setSelectedId(action.id)
+    else if (action?.type === 'new') addProgram()
+  }
+
+  if (adminLayout === 'table') {
+    return (
+      <div className="max-w-7xl mx-auto px-6 py-6">
+        <BulkListView
+          programs={programs}
+          categories={categories}
+          filtered={filtered}
+          search={search}
+          setSearch={setSearch}
+          updateProgram={updateProgram}
+          deleteProgram={deleteProgram}
+          addProgram={addProgram}
+          onEditProgram={(id) => { setSelectedId(id); setAdminLayout('editor') }}
+          onSwitchToEditor={() => setAdminLayout('editor')}
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="max-w-7xl mx-auto px-6 py-6">
+      {pendingAction && (
+        <UnsavedModal onDiscard={confirmDiscard} onKeep={() => setPendingAction(null)} />
+      )}
       <div className="grid grid-cols-12 gap-6" style={{ minHeight: 'calc(100vh - 6.5rem)' }}>
         <aside className="col-span-12 md:col-span-4 lg:col-span-3">
           <div
@@ -295,12 +344,21 @@ function AdminView({
             style={{ height: 'calc(100vh - 7.5rem)' }}
           >
             <div className="p-3 border-b border-stone-200 space-y-2">
-              <button
-                onClick={addProgram}
-                className="w-full flex items-center justify-center gap-1.5 bg-stone-900 text-white rounded-lg py-2 text-sm font-medium hover:bg-stone-800 transition"
-              >
-                <Plus className="w-4 h-4" /> New Program
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleAddProgram}
+                  className="flex-1 flex items-center justify-center gap-1.5 bg-stone-900 text-white rounded-lg py-2 text-sm font-medium hover:bg-stone-800 transition"
+                >
+                  <Plus className="w-4 h-4" /> New Program
+                </button>
+                <button
+                  onClick={() => setAdminLayout('table')}
+                  title="List view"
+                  className="border border-stone-200 rounded-lg px-2.5 hover:bg-stone-50 text-stone-500 hover:text-stone-900 transition"
+                >
+                  <List className="w-4 h-4" />
+                </button>
+              </div>
               <div className="relative">
                 <Search className="w-3.5 h-3.5 text-stone-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                 <input
@@ -320,7 +378,7 @@ function AdminView({
                   key={p.id}
                   program={p}
                   selected={selected?.id === p.id}
-                  onSelect={() => setSelectedId(p.id)}
+                  onSelect={() => handleSelectProgram(p.id)}
                 />
               ))}
             </div>
@@ -339,13 +397,11 @@ function AdminView({
               categories={categories}
               updateProgram={updateProgram}
               deleteProgram={deleteProgram}
-              addDegree={addDegree}
-              updateDegree={updateDegree}
-              removeDegree={removeDegree}
               addCategory={addCategory}
+              onDirtyChange={setEditorDirty}
             />
           ) : (
-            <EmptyEditor onAdd={addProgram} />
+            <EmptyEditor onAdd={handleAddProgram} />
           )}
         </main>
       </div>
@@ -367,17 +423,10 @@ function ProgramRow({ program, selected, onSelect }) {
           {program.status !== 'published' && <StatusPill status={program.status} />}
         </div>
         <div className="row-sub text-xs text-stone-500 truncate mt-0.5">{program.category || '—'}</div>
-        <div className="flex items-center gap-1 mt-1.5">
-          {program.degrees.slice(0, 6).map((d) => (
-            <span
-              key={d.id}
-              className={`w-1.5 h-1.5 rounded-full ${MODE_DOT[d.deliveryMode]}`}
-              title={`${d.type} · ${MODE_LABEL[d.deliveryMode]}`}
-            />
-          ))}
-          {program.degrees.length > 6 && (
-            <span className="text-[10px] text-stone-400">+{program.degrees.length - 6}</span>
-          )}
+        <div className="mt-1.5">
+          <span className="text-[11px] text-stone-400">
+            {program.degrees.length} degree{program.degrees.length !== 1 ? 's' : ''}
+          </span>
         </div>
       </div>
       <ChevronRight className="row-chev w-4 h-4 text-stone-300 mt-0.5" />
@@ -402,25 +451,47 @@ function EmptyEditor({ onAdd }) {
    Editor
 ============================================================================ */
 
-function Editor({ program, categories, updateProgram, deleteProgram, addDegree, updateDegree, removeDegree, addCategory }) {
+function Editor({ program, categories, updateProgram, deleteProgram, addCategory, onDirtyChange }) {
+  const [draft, setDraft] = useState(program)
   const [showCategoryAdd, setShowCategoryAdd] = useState(false)
   const [newCat, setNewCat] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
 
+  const isDirty = JSON.stringify(draft) !== JSON.stringify(program)
+
+  useEffect(() => { onDirtyChange?.(isDirty) }, [isDirty])
+  useEffect(() => { setDraft(program) }, [program.id])
+
+  const patchDraft = (patch) => setDraft((d) => ({ ...d, ...patch }))
+
+  const patchDegreeDraft = (degId, patch) =>
+    setDraft((d) => ({ ...d, degrees: d.degrees.map((deg) => deg.id === degId ? { ...deg, ...patch } : deg) }))
+
+  const addDegreeDraft = () =>
+    setDraft((d) => ({
+      ...d,
+      degrees: [...d.degrees, { id: genId(), degreeCategory: 'Masters', type: '', deliveryMode: 'on-campus', url: '' }],
+    }))
+
+  const removeDegreeDraft = (degId) =>
+    setDraft((d) => ({ ...d, degrees: d.degrees.filter((deg) => deg.id !== degId) }))
+
+  const handleSave = () => updateProgram(program.id, draft)
+
   return (
     <div className="bg-white border border-stone-200 rounded-xl anim-fade-up">
-      <div class="px-7 py-6 space-y-7">
-         <label className="flex items-center gap-2 cursor-pointer text-xs text-stone-600 select-none pt-1">
+      <div className="px-7 py-6 space-y-7">
+        <label className="flex items-center gap-2 cursor-pointer text-xs text-stone-600 select-none pt-1">
           <span className="text-[10px] uppercase tracking-wider text-stone-500">Status</span>
           <div className="flex bg-stone-100 rounded-md p-0.5">
             {STATUS_OPTIONS.map((s) => {
               const meta = STATUS_META[s]
-              const active = program.status === s
+              const active = draft.status === s
               return (
                 <button
                   key={s}
                   type="button"
-                  onClick={() => updateProgram(program.id, { status: s })}
+                  onClick={() => patchDraft({ status: s })}
                   className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded transition ${
                     active ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 hover:text-stone-800'
                   }`}
@@ -432,18 +503,17 @@ function Editor({ program, categories, updateProgram, deleteProgram, addDegree, 
             })}
           </div>
         </label>
-        </div> 
+      </div>
       <div className="px-7 pt-7 pb-5 border-b border-stone-100 flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           <div className="text-xs text-stone-500 uppercase tracking-wider mb-1">Editing program</div>
           <input
-            value={program.title}
-            onChange={(e) => updateProgram(program.id, { title: e.target.value })}
+            value={draft.title}
+            onChange={(e) => patchDraft({ title: e.target.value })}
             placeholder="Program Title"
             className="input-base font-display text-3xl font-semibold w-full bg-transparent border-0 focus:ring-0 focus:outline-none p-0"
           />
         </div>
-
       </div>
 
       <div className="px-7 py-6 space-y-7">
@@ -454,8 +524,8 @@ function Editor({ program, categories, updateProgram, deleteProgram, addDegree, 
               <FieldLabel>School</FieldLabel>
               <div className="flex gap-2">
                 <select
-                  value={program.category}
-                  onChange={(e) => updateProgram(program.id, { category: e.target.value })}
+                  value={draft.category}
+                  onChange={(e) => patchDraft({ category: e.target.value })}
                   className="input-base flex-1 text-sm border border-stone-200 rounded-md px-2.5 py-2 bg-white"
                 >
                   <option value="">— Select —</option>
@@ -480,7 +550,7 @@ function Editor({ program, categories, updateProgram, deleteProgram, addDegree, 
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         addCategory(newCat)
-                        if (newCat.trim()) updateProgram(program.id, { category: newCat.trim() })
+                        if (newCat.trim()) patchDraft({ category: newCat.trim() })
                         setNewCat('')
                         setShowCategoryAdd(false)
                       }
@@ -495,7 +565,7 @@ function Editor({ program, categories, updateProgram, deleteProgram, addDegree, 
                   <button
                     onClick={() => {
                       addCategory(newCat)
-                      if (newCat.trim()) updateProgram(program.id, { category: newCat.trim() })
+                      if (newCat.trim()) patchDraft({ category: newCat.trim() })
                       setNewCat('')
                       setShowCategoryAdd(false)
                     }}
@@ -510,8 +580,8 @@ function Editor({ program, categories, updateProgram, deleteProgram, addDegree, 
             <div>
               <FieldLabel>Short description</FieldLabel>
               <textarea
-                value={program.description}
-                onChange={(e) => updateProgram(program.id, { description: e.target.value })}
+                value={draft.description}
+                onChange={(e) => patchDraft({ description: e.target.value })}
                 placeholder="Appears on the public program card."
                 rows={3}
                 className="input-base w-full text-sm border border-stone-200 rounded-md px-3 py-2 bg-white resize-none"
@@ -523,15 +593,15 @@ function Editor({ program, categories, updateProgram, deleteProgram, addDegree, 
             <FieldLabel>Hero image URL</FieldLabel>
             <div className="flex gap-3 items-start">
               <input
-                value={program.image || ''}
-                onChange={(e) => updateProgram(program.id, { image: e.target.value })}
+                value={draft.image || ''}
+                onChange={(e) => patchDraft({ image: e.target.value })}
                 placeholder="https://education.ufl.edu/program-directory/files/…"
                 className="input-base flex-1 text-sm border border-stone-200 rounded-md px-2.5 py-2 bg-white"
               />
               <div className="w-28 h-16 rounded-md border border-stone-200 bg-stone-50 overflow-hidden flex-shrink-0 flex items-center justify-center">
-                {program.image ? (
+                {draft.image ? (
                   <img
-                    src={program.image}
+                    src={draft.image}
                     alt=""
                     className="w-full h-full object-cover"
                     onError={(e) => { e.currentTarget.style.display = 'none' }}
@@ -548,7 +618,7 @@ function Editor({ program, categories, updateProgram, deleteProgram, addDegree, 
           <div className="flex items-end justify-between mb-2">
             <SectionLabel className="mb-0">Degree Offerings</SectionLabel>
             <span className="text-xs text-stone-500">
-              {program.degrees.length} offering{program.degrees.length !== 1 ? 's' : ''}
+              {draft.degrees.length} offering{draft.degrees.length !== 1 ? 's' : ''}
             </span>
           </div>
           <p className="text-xs text-stone-500 mb-3">
@@ -556,15 +626,15 @@ function Editor({ program, categories, updateProgram, deleteProgram, addDegree, 
           </p>
 
           <div className="space-y-2">
-            {program.degrees.map((d) => (
+            {draft.degrees.map((d) => (
               <DegreeRow
                 key={d.id}
                 degree={d}
-                onChange={(patch) => updateDegree(program.id, d.id, patch)}
-                onRemove={() => removeDegree(program.id, d.id)}
+                onChange={(patch) => patchDegreeDraft(d.id, patch)}
+                onRemove={() => removeDegreeDraft(d.id)}
               />
             ))}
-            {program.degrees.length === 0 && (
+            {draft.degrees.length === 0 && (
               <div className="text-sm text-stone-500 border border-dashed border-stone-200 rounded-lg py-6 text-center bg-stone-50/60">
                 No offerings yet. Add a degree below.
               </div>
@@ -572,7 +642,7 @@ function Editor({ program, categories, updateProgram, deleteProgram, addDegree, 
           </div>
 
           <button
-            onClick={() => addDegree(program.id)}
+            onClick={addDegreeDraft}
             className="mt-3 inline-flex items-center gap-1.5 text-sm border border-stone-200 hover:border-stone-300 hover:bg-stone-50 px-3 py-1.5 rounded-md"
           >
             <Plus className="w-3.5 h-3.5" /> Add degree offering
@@ -603,7 +673,55 @@ function Editor({ program, categories, updateProgram, deleteProgram, addDegree, 
             </button>
           </div>
         )}
-        <div className="text-xs text-stone-400 font-mono">{program.id}</div>
+        <div className="flex items-center gap-3">
+          {isDirty && <span className="text-xs text-amber-600 font-medium">Unsaved changes</span>}
+          <button
+            onClick={handleSave}
+            disabled={!isDirty}
+            className={`flex items-center gap-1.5 text-sm font-medium px-4 py-1.5 rounded-lg transition ${
+              isDirty
+                ? 'bg-stone-900 text-white hover:bg-stone-700'
+                : 'bg-stone-100 text-stone-400 cursor-not-allowed'
+            }`}
+          >
+            <Check className="w-3.5 h-3.5" /> Save
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function UnsavedModal({ onDiscard, onKeep }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" onClick={onKeep} />
+      <div className="relative bg-white rounded-xl shadow-xl border border-stone-200 p-6 max-w-sm w-full mx-4 anim-fade-up">
+        <div className="flex items-start gap-3 mb-5">
+          <div className="w-9 h-9 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+            <AlertCircle className="w-5 h-5 text-amber-600" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-stone-900 mb-1">Unsaved changes</h3>
+            <p className="text-sm text-stone-600 leading-relaxed">
+              You have unsaved changes. If you leave now, your changes will be lost.
+            </p>
+          </div>
+        </div>
+        <div className="flex gap-2 justify-end">
+          <button
+            onClick={onKeep}
+            className="px-3 py-1.5 text-sm text-stone-700 border border-stone-200 rounded-lg hover:bg-stone-50 transition"
+          >
+            Keep editing
+          </button>
+          <button
+            onClick={onDiscard}
+            className="px-3 py-1.5 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
+          >
+            Discard changes
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -634,46 +752,59 @@ function StatusPill({ status }) {
 ============================================================================ */
 
 function DegreeRow({ degree, onChange, onRemove }) {
+  const abbrevId = 'abbrev-' + degree.id
+  const suggestions = DEGREE_ABBREV_SUGGESTIONS[degree.degreeCategory] || []
   return (
     <div className="border border-stone-200 rounded-lg bg-white overflow-hidden">
-      <div className="grid grid-cols-12 gap-3 p-3 items-center">
+      <div className="grid grid-cols-12 gap-3 p-3 items-start">
+        {/* Degree type dropdown */}
         <div className="col-span-12 md:col-span-3">
           <FieldLabel>Degree type</FieldLabel>
+          <select
+            value={degree.degreeCategory || ''}
+            onChange={(e) => onChange({ degreeCategory: e.target.value, type: '' })}
+            className="input-base w-full text-sm border border-stone-200 rounded-md px-2.5 py-2 bg-white"
+          >
+            <option value="">— Select —</option>
+            {DEGREE_CATEGORIES.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Specific abbreviation */}
+        <div className="col-span-12 md:col-span-3">
+          <FieldLabel>Abbreviation</FieldLabel>
           <input
-            list="degree-types"
+            list={abbrevId}
             value={degree.type}
             onChange={(e) => onChange({ type: e.target.value })}
+            placeholder="e.g. M.Ed., B.A.E."
             className="input-base w-full text-sm border border-stone-200 rounded-md px-2.5 py-2 bg-white"
           />
-          <datalist id="degree-types">
-            {DEGREE_TYPES_PRESET.map((t) => (
+          <datalist id={abbrevId}>
+            {suggestions.map((t) => (
               <option key={t} value={t} />
             ))}
           </datalist>
         </div>
 
-        <div className="col-span-12 md:col-span-4">
+        {/* Delivery mode dropdown */}
+        <div className="col-span-12 md:col-span-2">
           <FieldLabel>Delivery mode</FieldLabel>
-          <div className="flex bg-stone-100 rounded-md p-0.5">
-            {DELIVERY_MODES.map((m) => {
-              const active = degree.deliveryMode === m.value
-              return (
-                <button
-                  key={m.value}
-                  onClick={() => onChange({ deliveryMode: m.value })}
-                  className={`flex-1 flex items-center justify-center gap-1.5 text-xs font-medium px-2 py-1.5 rounded transition ${
-                    active ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 hover:text-stone-800'
-                  }`}
-                >
-                  <span className={`w-1.5 h-1.5 rounded-full ${MODE_DOT[m.value]}`} />
-                  {m.label}
-                </button>
-              )
-            })}
-          </div>
+          <select
+            value={degree.deliveryMode}
+            onChange={(e) => onChange({ deliveryMode: e.target.value })}
+            className="input-base w-full text-sm border border-stone-200 rounded-md px-2.5 py-2 bg-white"
+          >
+            {DELIVERY_MODES.map((m) => (
+              <option key={m.value} value={m.value}>{m.label}</option>
+            ))}
+          </select>
         </div>
 
-        <div className="col-span-11 md:col-span-4">
+        {/* URL */}
+        <div className="col-span-11 md:col-span-3">
           <FieldLabel>Program URL</FieldLabel>
           <input
             value={degree.url}
@@ -683,7 +814,7 @@ function DegreeRow({ degree, onChange, onRemove }) {
           />
         </div>
 
-        <div className="col-span-1 flex items-end justify-end pb-0.5">
+        <div className="col-span-1 flex items-end justify-end pt-5">
           <button
             onClick={onRemove}
             className="text-stone-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50"
@@ -693,6 +824,392 @@ function DegreeRow({ degree, onChange, onRemove }) {
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+/* ============================================================================
+   Bulk List View
+============================================================================ */
+
+function BulkListView({
+  programs, categories, filtered, search, setSearch,
+  updateProgram, deleteProgram, addProgram,
+  onEditProgram, onSwitchToEditor,
+}) {
+  const [checkedIds, setCheckedIds] = useState(new Set())
+  const [bulkMenu, setBulkMenu] = useState(null) // 'status' | 'school' | null
+  const [filterSchool, setFilterSchool] = useState('')
+  const [filterDelivery, setFilterDelivery] = useState('')
+  const selectAllRef = useRef(null)
+
+  const displayRows = useMemo(() => {
+    return filtered.filter((p) => {
+      if (filterSchool && p.category !== filterSchool) return false
+      if (filterDelivery && !p.degrees.some((d) => d.deliveryMode === filterDelivery)) return false
+      return true
+    })
+  }, [filtered, filterSchool, filterDelivery])
+
+  const allChecked = displayRows.length > 0 && displayRows.every((p) => checkedIds.has(p.id))
+  const someChecked = !allChecked && displayRows.some((p) => checkedIds.has(p.id))
+
+  useEffect(() => {
+    if (selectAllRef.current) selectAllRef.current.indeterminate = someChecked
+  }, [someChecked])
+
+  const toggleAll = () => {
+    if (allChecked) setCheckedIds(new Set())
+    else setCheckedIds(new Set(displayRows.map((p) => p.id)))
+  }
+
+  const toggleOne = (id) =>
+    setCheckedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
+  const bulkSetStatus = (status) => {
+    checkedIds.forEach((id) => updateProgram(id, { status }))
+    setCheckedIds(new Set())
+    setBulkMenu(null)
+  }
+
+  const bulkSetCategory = (category) => {
+    checkedIds.forEach((id) => updateProgram(id, { category }))
+    setCheckedIds(new Set())
+    setBulkMenu(null)
+  }
+
+  const bulkDelete = () => {
+    if (!confirm(`Delete ${checkedIds.size} program${checkedIds.size !== 1 ? 's' : ''}? This cannot be undone.`)) return
+    checkedIds.forEach((id) => deleteProgram(id))
+    setCheckedIds(new Set())
+  }
+
+  return (
+    <div className="anim-fade-up">
+      {/* Toolbar */}
+      <div className="flex items-center justify-between mb-4 gap-3">
+        <div className="flex items-center gap-2 flex-1">
+          <button
+            onClick={onSwitchToEditor}
+            className="flex items-center gap-1.5 text-sm border border-stone-200 rounded-lg px-3 py-2 hover:bg-white hover:border-stone-300 text-stone-600 hover:text-stone-900 transition"
+          >
+            <PencilLine className="w-3.5 h-3.5" /> Editor
+          </button>
+          <div className="relative flex-1 max-w-xs">
+            <Search className="w-3.5 h-3.5 text-stone-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search programs…"
+              className="input-base w-full text-sm pl-8 pr-3 py-2 border border-stone-200 rounded-lg bg-white"
+            />
+          </div>
+        </div>
+        <button
+          onClick={addProgram}
+          className="flex items-center gap-1.5 bg-stone-900 text-white rounded-lg px-3 py-2 text-sm font-medium hover:bg-stone-800 transition"
+        >
+          <Plus className="w-4 h-4" /> New Program
+        </button>
+      </div>
+
+      {/* Filter row */}
+      <div className="flex items-center gap-3 mb-3 flex-wrap">
+        <Filter className="w-3.5 h-3.5 text-stone-400 shrink-0" />
+        <select
+          value={filterSchool}
+          onChange={(e) => setFilterSchool(e.target.value)}
+          className="input-base text-sm border border-stone-200 rounded-lg px-2.5 py-1.5 bg-white text-stone-700"
+        >
+          <option value="">All schools</option>
+          {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select
+          value={filterDelivery}
+          onChange={(e) => setFilterDelivery(e.target.value)}
+          className="input-base text-sm border border-stone-200 rounded-lg px-2.5 py-1.5 bg-white text-stone-700"
+        >
+          <option value="">All delivery types</option>
+          {DELIVERY_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+        </select>
+        {(filterSchool || filterDelivery) && (
+          <button
+            onClick={() => { setFilterSchool(''); setFilterDelivery('') }}
+            className="text-xs text-stone-500 hover:text-stone-900 flex items-center gap-1"
+          >
+            <X className="w-3 h-3" /> Clear
+          </button>
+        )}
+        <span className="ml-auto text-xs text-stone-500">{displayRows.length} of {programs.length}</span>
+      </div>
+
+      {/* Bulk action bar */}
+      {checkedIds.size > 0 && (
+        <div className="bg-stone-900 text-white rounded-xl px-4 py-2.5 mb-3 flex items-center gap-3 anim-fade-up">
+          <span className="text-sm font-medium tabular-nums">{checkedIds.size} selected</span>
+          <div className="w-px h-4 bg-stone-600" />
+
+          <div className="relative">
+            <button
+              onClick={() => setBulkMenu((m) => (m === 'status' ? null : 'status'))}
+              className="flex items-center gap-1.5 text-xs font-medium bg-stone-800 hover:bg-stone-700 px-3 py-1.5 rounded-md transition"
+            >
+              Set status <ChevronDown className="w-3 h-3" />
+            </button>
+            {bulkMenu === 'status' && (
+              <div className="absolute top-full left-0 mt-1.5 bg-white border border-stone-200 rounded-lg shadow-lg z-20 py-1 min-w-[140px]">
+                {STATUS_OPTIONS.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => bulkSetStatus(s)}
+                    className="w-full text-left px-3 py-1.5 text-xs text-stone-800 flex items-center gap-2 hover:bg-stone-50"
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full ${STATUS_META[s].dot}`} />
+                    {STATUS_META[s].label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="relative">
+            <button
+              onClick={() => setBulkMenu((m) => (m === 'school' ? null : 'school'))}
+              className="flex items-center gap-1.5 text-xs font-medium bg-stone-800 hover:bg-stone-700 px-3 py-1.5 rounded-md transition"
+            >
+              Set school <ChevronDown className="w-3 h-3" />
+            </button>
+            {bulkMenu === 'school' && (
+              <div className="absolute top-full left-0 mt-1.5 bg-white border border-stone-200 rounded-lg shadow-lg z-20 py-1 min-w-[260px]">
+                {categories.map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => bulkSetCategory(c)}
+                    className="w-full text-left px-3 py-1.5 text-xs text-stone-800 hover:bg-stone-50"
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={bulkDelete}
+            className="flex items-center gap-1.5 text-xs font-medium bg-red-600 hover:bg-red-700 px-3 py-1.5 rounded-md transition"
+          >
+            <Trash2 className="w-3 h-3" /> Delete
+          </button>
+
+          <button
+            onClick={() => { setCheckedIds(new Set()); setBulkMenu(null) }}
+            className="ml-auto text-stone-400 hover:text-white transition"
+            title="Clear selection"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Table */}
+      <div className="bg-white border border-stone-200 rounded-xl overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr className="border-b border-stone-200 bg-stone-50/80">
+                <th className="w-10 px-3 py-3 text-left">
+                  <input
+                    ref={selectAllRef}
+                    type="checkbox"
+                    checked={allChecked}
+                    onChange={toggleAll}
+                    className="rounded border-stone-300 accent-stone-900 cursor-pointer"
+                  />
+                </th>
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-stone-500 min-w-[220px]">Title</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-stone-500 min-w-[200px]">School</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-stone-500 min-w-[180px]">Status</th>
+                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-stone-500 min-w-[120px]">Offerings</th>
+                <th className="w-20 px-3 py-3" />
+              </tr>
+            </thead>
+            <tbody>
+              {displayRows.map((p) => (
+                <BulkRow
+                  key={p.id}
+                  program={p}
+                  checked={checkedIds.has(p.id)}
+                  onToggle={() => toggleOne(p.id)}
+                  onUpdate={(patch) => updateProgram(p.id, patch)}
+                  onDelete={() => deleteProgram(p.id)}
+                  onEdit={() => onEditProgram(p.id)}
+                  categories={categories}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {displayRows.length === 0 && (
+          <div className="py-12 text-center text-sm text-stone-500">No programs found</div>
+        )}
+
+        <div className="px-4 py-2.5 border-t border-stone-100 text-xs text-stone-500 flex items-center justify-between bg-stone-50/40">
+          <span>{programs.length} program{programs.length !== 1 ? 's' : ''}</span>
+          <span>{programs.reduce((n, p) => n + p.degrees.length, 0)} total offerings</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function BulkRow({ program, checked, onToggle, onUpdate, onDelete, onEdit, categories }) {
+  const [editingTitle, setEditingTitle] = useState(false)
+  const [titleDraft, setTitleDraft] = useState(program.title)
+
+  const commitTitle = () => {
+    onUpdate({ title: titleDraft })
+    setEditingTitle(false)
+  }
+
+  return (
+    <tr
+      className={`group border-b border-stone-100 transition-colors ${
+        checked ? 'bg-blue-50/40' : 'hover:bg-stone-50/60'
+      }`}
+    >
+      <td className="px-3 py-2.5">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={onToggle}
+          className="rounded border-stone-300 accent-stone-900 cursor-pointer"
+        />
+      </td>
+
+      <td className="px-3 py-2.5 font-medium text-stone-900">
+        {editingTitle ? (
+          <input
+            autoFocus
+            value={titleDraft}
+            onChange={(e) => setTitleDraft(e.target.value)}
+            onBlur={commitTitle}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitTitle()
+              if (e.key === 'Escape') { setTitleDraft(program.title); setEditingTitle(false) }
+            }}
+            className="input-base w-full border border-stone-300 rounded px-2 py-0.5 text-sm font-medium"
+          />
+        ) : (
+          <button
+            onClick={() => { setTitleDraft(program.title); setEditingTitle(true) }}
+            className="text-left hover:underline underline-offset-2 decoration-stone-300 w-full"
+            title="Click to edit title"
+          >
+            {program.title || 'Untitled'}
+          </button>
+        )}
+      </td>
+
+      <td className="px-3 py-2.5">
+        <select
+          value={program.category}
+          onChange={(e) => onUpdate({ category: e.target.value })}
+          className="text-sm text-stone-600 bg-transparent border-0 cursor-pointer hover:text-stone-900 focus:outline-none focus:ring-0 pr-1 -ml-0.5 w-full"
+        >
+          {categories.map((c) => (
+            <option key={c} value={c}>{c}</option>
+          ))}
+        </select>
+      </td>
+
+      <td className="px-3 py-2.5">
+        <StatusDropdown status={program.status} onChange={(s) => onUpdate({ status: s })} />
+      </td>
+
+      <td className="px-3 py-2.5">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-stone-500 tabular-nums w-4 shrink-0">{program.degrees.length}</span>
+          <div className="flex gap-1 flex-wrap">
+            {program.degrees.slice(0, 8).map((d) => (
+              <span
+                key={d.id}
+                className={`w-2 h-2 rounded-full ${MODE_DOT[d.deliveryMode]}`}
+                title={`${d.degreeCategory || d.type}${d.degreeCategory && d.type ? ' · ' + d.type : ''} · ${MODE_LABEL[d.deliveryMode]}`}
+              />
+            ))}
+            {program.degrees.length > 8 && (
+              <span className="text-[10px] text-stone-400">+{program.degrees.length - 8}</span>
+            )}
+          </div>
+        </div>
+      </td>
+
+      <td className="px-3 py-2.5">
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            onClick={onEdit}
+            className="p-1.5 rounded hover:bg-stone-100 text-stone-400 hover:text-stone-800 transition"
+            title="Open in editor"
+          >
+            <PencilLine className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={onDelete}
+            className="p-1.5 rounded hover:bg-red-50 text-stone-400 hover:text-red-600 transition"
+            title="Delete program"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </td>
+    </tr>
+  )
+}
+
+function StatusDropdown({ status, onChange }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  const meta = STATUS_META[status] || STATUS_META.draft
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  return (
+    <div className="relative inline-block" ref={ref}>
+      <button
+        onClick={() => setOpen((s) => !s)}
+        className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-md border ${meta.tint} hover:shadow-sm transition`}
+      >
+        <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />
+        {meta.label}
+        <ChevronDown className="w-3 h-3 opacity-60" />
+      </button>
+      {open && (
+        <div className="absolute top-full left-0 mt-1.5 bg-white border border-stone-200 rounded-lg shadow-lg z-20 py-1 min-w-[130px]">
+          {STATUS_OPTIONS.map((s) => (
+            <button
+              key={s}
+              onClick={() => { onChange(s); setOpen(false) }}
+              className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 hover:bg-stone-50 ${
+                status === s ? 'font-semibold text-stone-900' : 'text-stone-700'
+              }`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${STATUS_META[s].dot}`} />
+              {STATUS_META[s].label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -720,8 +1237,12 @@ function PreviewView({ programs, categories }) {
 
   const usedDegreeTypes = useMemo(() => {
     const set = new Set()
-    programs.forEach((p) => p.degrees.forEach((d) => set.add(d.type)))
-    return Array.from(set).sort()
+    programs.forEach((p) =>
+      p.degrees.forEach((d) => {
+        if (d.degreeCategory && DEGREE_CATEGORIES.includes(d.degreeCategory)) set.add(d.degreeCategory)
+      })
+    )
+    return DEGREE_CATEGORIES.filter((c) => set.has(c))
   }, [programs])
 
   const usedCategories = useMemo(() => {
@@ -745,7 +1266,7 @@ function PreviewView({ programs, categories }) {
       if (activeDegrees.length || activeModes.length) {
         const matches = p.degrees.some(
           (d) =>
-            (!activeDegrees.length || activeDegrees.includes(d.type)) &&
+            (!activeDegrees.length || activeDegrees.includes(d.degreeCategory)) &&
             (!activeModes.length || activeModes.includes(d.deliveryMode))
         )
         if (!matches) return false
@@ -945,8 +1466,11 @@ function ProgramCard({ program, activeDegrees, activeModes }) {
         <div className="mt-auto pt-3 border-t border-stone-100 space-y-1.5">
           {program.degrees.map((d) => {
             const dimmed =
-              (activeDegrees.length && !activeDegrees.includes(d.type)) ||
+              (activeDegrees.length && !activeDegrees.includes(d.degreeCategory)) ||
               (activeModes.length && !activeModes.includes(d.deliveryMode))
+            const degreeLabel = d.degreeCategory
+              ? d.type ? `${d.degreeCategory} · ${d.type}` : d.degreeCategory
+              : d.type
             return (
               <div key={d.id} className={`flex items-center gap-2 text-sm ${dimmed ? 'opacity-40' : ''}`}>
                 <span
@@ -955,7 +1479,7 @@ function ProgramCard({ program, activeDegrees, activeModes }) {
                   <span className={`w-1.5 h-1.5 rounded-full ${MODE_DOT[d.deliveryMode]}`} />
                   {MODE_LABEL[d.deliveryMode]}
                 </span>
-                <span className="text-stone-800">{d.type}</span>
+                <span className="text-stone-800">{degreeLabel}</span>
                 {d.url && (
                   <a
                     href={d.url}
@@ -1006,10 +1530,13 @@ function ProgramListItem({ program, activeDegrees, activeModes }) {
         <div className="flex flex-wrap gap-1.5">
           {program.degrees.map((d) => {
             const dimmed =
-              (activeDegrees.length && !activeDegrees.includes(d.type)) ||
+              (activeDegrees.length && !activeDegrees.includes(d.degreeCategory)) ||
               (activeModes.length && !activeModes.includes(d.deliveryMode))
             const Tag = d.url ? 'a' : 'span'
             const linkProps = d.url ? { href: d.url, target: '_blank', rel: 'noreferrer' } : {}
+            const degreeLabel = d.degreeCategory
+              ? d.type ? `${d.degreeCategory} · ${d.type}` : d.degreeCategory
+              : d.type
             return (
               <Tag
                 key={d.id}
@@ -1019,7 +1546,7 @@ function ProgramListItem({ program, activeDegrees, activeModes }) {
                 } ${d.url ? 'hover:shadow-sm transition cursor-pointer' : ''}`}
               >
                 <span className={`w-1.5 h-1.5 rounded-full ${MODE_DOT[d.deliveryMode]}`} />
-                <span className="font-medium">{d.type}</span>
+                <span className="font-medium">{degreeLabel}</span>
                 <span className="opacity-50">·</span>
                 <span>{MODE_LABEL[d.deliveryMode]}</span>
               </Tag>
